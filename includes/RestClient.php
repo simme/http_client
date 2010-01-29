@@ -12,27 +12,13 @@ class RestClient {
    * Creates a Rest client
    *
    * @param string $authentication
+   * @param string $formatter
    * @param string $request_alter
-   * @param string $unserialize
-   * @author Hugo Wetterberg
    */
-  public function __construct($authentication=NULL, $formatter=NULL, $request_alter=NULL) {
-    $this->authentication = $authentication;
-    $this->formatter = $formatter;
-
-    if (!$formatter || in_array('RestClientFormatter', class_implements($formatter))) {
-      $this->formatter = $formatter;
-    }
-    else {
-      throw new Exception(t('The formatter parameter must either be a object implementing RestClientFormatter, or evaluate to FALSE.'));
-    }
-
-    if (!$this->request_alter || is_callable(array($request_alter, 'alterRequest'))) {
-      $this->request_alter = $request_alter;
-    }
-    else {
-      throw new Exception(t('The request_alter parameter must either be a object with a public alterRequest method, or evaluate to FALSE.'));
-    }
+  public function __construct($authentication = NULL, $formatter = NULL, $request_alter = NULL) {
+    $this->setAuthentication($authentication);
+    $this->setFormatter($formatter);
+    $this->setRequestAlter($request_alter);
   }
 
   /**
@@ -41,9 +27,18 @@ class RestClient {
    *   The class to use for authentication. Must implement RestClientAuthentication
    *
    * @return void
+   * @throws InvalidArgumentException
    */
-  public function setAuthentication(RestClientAuthentication $auth) {
-    $this->authentication = $auth;
+  public function setAuthentication($auth) {
+    // Validate authenticator class
+    if (!$authentication || ($authentication instanceof RestClientAuthentication)) {
+      $this->authentication = $authentication;
+    }
+    else {
+      throw new InvalidArgumentException(
+        'The authentication paramater must either be an object implementing RestClientAuthentication or evaluate to fALSE.'
+      );
+    }
   }
 
   /**
@@ -52,36 +47,94 @@ class RestClient {
    *   The class to use for formatting. Must implement RestClientFormatter
    *
    * @return void
+   * @throws InvalidArgumentException
    */
-  public function setFormatter(RestClientFormatter $formatter) {
-    $this->formatter = $formatter;
+  public function setFormatter($formatter) {
+    // Validate formatter
+    if (!$formatter || ($formatter instanceof RestClientFormatter)) {
+      $this->formatter = $formatter;
+    }
+    else {
+      throw new InvalidArgumentException(
+        'The formatter parameter must either be an object implementing RestClientFormatter or evaluate to FALSE.'
+      );
+    }
   }
 
+  /**
+   * Inject formatter class
+   * @param RestClientFormatter $formatter
+   *   The class to use for formatting. Must implement RestClientFormatter
+   *
+   * @return void
+   * @throws InvalidArgumentException
+   */
+  public function setRequestAlter($request_alter) {
+    // Validate request alterer
+    if (is_object($request_alter)) {
+      $request_alter = array($request_alter, 'alterRequest');
+    }
+    if (!$request_alter || is_callable($request_alter)) {
+      $this->request_alter = $request_alter;
+    }
+    else {
+      throw new InvalidArgumentException(
+        'The request_alter parameter must either be an object with a public alterRequest method, array with (object, method) or evaluate to FALSE.'
+      );
+    }
+  }
+  
+  /**
+   * Performs a get request against $url with $parameters
+   *
+   * @param string $url
+   * @param array $parameters
+   *
+   * @return object response
+   */
   public function get($url, $parameters) {
     $ch = $this->curl($url, $parameters, 'GET');
     return $this->execute($ch);
   }
-
-  public function post($url, $data, $parameters=array()) {
+  
+  /**
+   * Performs a post request against $url with $data and $parameters
+   *
+   * @param string $url
+   * @param RestClientData $data
+   * @param array $parameters
+   *
+   * @return object response
+   */
+  public function post($url, $data, $parameters = array()) {
     $ch = $this->curl($url, $parameters, 'POST', $data);
     return $this->execute($ch);
   }
 
-  public function put($url, $data, $parameters=array()) {
+  /**
+   * Performs a put request against $url with $data and $parameters
+   *
+   * @param string $url
+   * @param RestClientData $data
+   * @param array $parameters
+   *
+   * @return object response
+   */
+  public function put($url, $data, $parameters = array()) {
     $ch = $this->curl($url, $parameters, 'PUT', $data);
     return $this->execute($ch);
   }
 
-  public function delete($url, $parameters=array()) {
+  /**
+   * Performs a delete request against $url with $parameters
+   *
+   * @param string $url
+   * @param array $parameters
+   *
+   * @return object response
+   */
+  public function delete($url, $parameters = array()) {
     $ch = $this->curl($url, $parameters, 'DELETE');
-    return $this->execute($ch);
-  }
-
-  public function postFile($url, $file, $mime, $parameters=array()) {
-    $contents = file_get_contents($file);
-    $ch = $this->curlRaw($url, $parameters, 'POST', $contents, $mime, array(
-      'Content-disposition: inline; filename="' . addslashes(basename($file)) . '"',
-    ));
     return $this->execute($ch);
   }
 
@@ -198,95 +251,3 @@ class RestClient {
 
 }
 
-class RestClientBaseFormatter implements RestClientFormatter {
-  const FORMAT_PHP = 'php';
-  const FORMAT_JSON = 'json';
-
-  private $format;
-
-  public function __construct($format=self::FORMAT_PHP) {
-    $this->format = $format;
-  }
-
-  /**
-   * Serializes arbitrary data.
-   *
-   * @param mixed $data
-   *  The data that should be serialized.
-   * @return string
-   *  The serialized data as a string.
-   */
-  public function serialize($data) {
-    switch($this->format) {
-      case self::FORMAT_PHP:
-        return serialize($data);
-        break;
-      case self::FORMAT_JSON:
-        return json_encode($data);
-        break;
-    }
-  }
-
-  /**
-   * Unserializes data.
-   *
-   * @param string $data
-   *  The data that should be unserialized.
-   * @return mixed
-   *  The unserialized data.
-   */
-  public function unserialize($data) {
-    switch($this->format) {
-      case self::FORMAT_PHP:
-        if (($res = @unserialize($data))!==FALSE || $data === serialize(FALSE)) {
-          return $res;
-        }
-        else {
-          throw new Exception(t('Unserialization of response body failed.'), 1);
-        }
-        break;
-      case self::FORMAT_JSON:
-        return json_decode($data);
-        break;
-    }
-  }
-}
-
-/**
- * Interface implemented by formatter implementations for the rest client
- */
-interface RestClientFormatter {
-  /**
-   * Serializes arbitrary data to the implemented format.
-   *
-   * @param mixed $data
-   *  The data that should be serialized.
-   * @return string
-   *  The serialized data as a string.
-   */
-  public function serialize($data);
-
-  /**
-   * Unserializes data in the implemented format.
-   *
-   * @param string $data
-   *  The data that should be unserialized.
-   * @return mixed
-   *  The unserialized data.
-   */
-  public function unserialize($data);
-}
-
-/**
- * Interface that should be implemented by classes that provides a
- * authentication method for the rest client.
- */
-interface RestClientAuthentication {
-  /**
-   * Used by the RestClient to authenticate requests.
-   *
-   * @param RestClientRequest $request
-   * @return void
-   */
-  public function authenticate($request);
-}
